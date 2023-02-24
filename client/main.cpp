@@ -26,8 +26,7 @@ int main(int argc, const char** argv)
 	std::string ip;
 	std::string port;
 	std::string prompt = name;
-	std::thread reciever;
-	bool connected = false;
+	std::jthread reciever;
 
 	std::cout << prompt << " > ";
 
@@ -51,11 +50,10 @@ int main(int argc, const char** argv)
 				}
 				else {
 					// only one MS, so no need to consider reconnecting to other MS
-					connected = true;
 					prompt = ip + ':' + port + '|' + name;
-					reciever = std::thread([&]() {
+					reciever = std::jthread([&](std::stop_token st) {
 						char data[1024] = { 0 };
-						while (connected) {
+						while (!st.stop_requested()) {
 							try {
 								auto n = socket.read_some(asio::buffer(data));
 								std::cout << std::endl << std::string(data, n) << std::endl;
@@ -64,8 +62,8 @@ int main(int argc, const char** argv)
 							catch (std::system_error& e) {
 								// 10054: remote close
 								if (e.code().value() == 10054) {
-									connected = false;
 									prompt = name;
+									reciever.request_stop();
 								}
 
 								// 10053: software caused connection abort
@@ -104,11 +102,8 @@ int main(int argc, const char** argv)
 		}
 
 		if (input == "BYE" || input == "QUIT") {
-			if (reciever.joinable()) {
-				connected = false;
-				socket.close();
-				reciever.join();
-			}
+			reciever.request_stop();
+			socket.close();
 			prompt = name;
 		}
 
