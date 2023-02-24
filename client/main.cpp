@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <asio.hpp>
+#include <regex>
 
 using asio::ip::tcp;
 
@@ -34,8 +35,11 @@ int main(int argc, const char** argv)
 	std::string input;
 	while (std::getline(std::cin, input)) {
 		if (input.starts_with("HI ")) {
-			ip = input.substr(3, input.find(':') - 3);
-			port = input.substr(input.find(':') + 1);
+			std::smatch m;
+			std::regex_match(input, m, std::regex("HI (.*):(.*)"));
+
+			ip = m[1].str();
+			port = m[2].str();
 
 			tcp::resolver resolver(io_context);
 			try {

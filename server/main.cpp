@@ -2,6 +2,7 @@
 #include <sstream>
 #include <asio.hpp>
 #include <chrono>
+#include <regex>
 
 using asio::ip::tcp;
 using asio::awaitable;
@@ -32,8 +33,11 @@ awaitable<void> chat(tcp::socket socket)
 			std::size_t n = co_await socket.async_read_some(asio::buffer(data), use_awaitable);
 			std::string msg = std::string(data, n);
 
-			std::string target = msg.substr(1, msg.find(' ') - 1);
-			std::string text = msg.substr(msg.find(' ') + 1);
+			std::smatch m;
+			std::regex_match(msg, m, std::regex("@(.*) (.*)"));
+
+			std::string target = m[1].str();
+			std::string text = m[2].str();
 
 			std::stringstream ss;
 			auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
