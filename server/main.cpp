@@ -12,7 +12,7 @@ namespace this_coro = asio::this_coro;
 
 std::unordered_map<std::string, tcp::socket*> users;
 
-awaitable<void> echo(tcp::socket socket)
+awaitable<void> chat(tcp::socket socket)
 {
 	std::string name;
 
@@ -22,8 +22,11 @@ awaitable<void> echo(tcp::socket socket)
 		std::size_t n = co_await socket.async_read_some(asio::buffer(data), use_awaitable);
 		name = std::string(data, n);
 
+		// try to registration, and return the result
 		auto [_, success] = users.try_emplace(name, &socket);
 		co_await async_write(socket, asio::buffer(success ? "ok" : "ng"), use_awaitable);
+		if (!success)
+			co_return;
 
 		for (;;) {
 			std::size_t n = co_await socket.async_read_some(asio::buffer(data), use_awaitable);
@@ -33,28 +36,39 @@ awaitable<void> echo(tcp::socket socket)
 			std::string text = msg.substr(msg.find(' ') + 1);
 
 			std::stringstream ss;
-			if (target != name) {
-				if (users.contains(target)) {
-					auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-					ss << std::put_time(std::localtime(&now), "%Y/%m/%d %T ") << name << ": " << text;
+			auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
+			if (target == name) {
+				ss << std::put_time(std::localtime(&now), "%Y/%m/%d %T ") << name << ": " << text;
+				co_await async_write(socket, asio::buffer(ss.str()), use_awaitable);
+			}
+			else if (target == "all") {
+				ss << std::put_time(std::localtime(&now), "%Y/%m/%d %T broadcase from ") << name << ": " << text;
+				for (auto& [_, s] : users)
+					co_await async_write(*s, asio::buffer(ss.str()), use_awaitable);
+			}
+			else {
+				if (users.contains(target)) {
+					ss << std::put_time(std::localtime(&now), "%Y/%m/%d %T ") << name << ": " << text;
 					co_await async_write(*users[target], asio::buffer(ss.str()), use_awaitable);
 				}
-				else {
+				else
 					ss << target << " is not online";
-				}
+
+				// echo of the send message
 				co_await async_write(socket, asio::buffer(ss.str()), use_awaitable);
 			}
 		}
 	}
 	catch (std::system_error& e) {
+		// eof / 10054: remote close
 		if (e.code() != asio::stream_errc::eof && e.code().value() != 10054)
-			std::printf("echo Exception: %s\n", e.what());
+			std::cerr << e.what() << std::endl;
 		else
 			users.erase(name);
 	}
 	catch (std::exception& e) {
-		std::printf("echo Exception: %s\n", e.what());
+		std::cerr << e.what() << std::endl;
 	}
 }
 
@@ -65,7 +79,7 @@ awaitable<void> listener(unsigned short port)
 
 	for (;;) {
 		tcp::socket socket = co_await acceptor.async_accept(use_awaitable);
-		co_spawn(executor, echo(std::move(socket)), detached);
+		co_spawn(executor, chat(std::move(socket)), detached);
 	}
 }
 
@@ -90,8 +104,9 @@ int main(int argc, const char** argv)
 		co_spawn(io_context, std::bind(listener, port), detached);
 
 		io_context.run();
-	} catch (std::exception& e) {
-		std::printf("Exception: %s\n", e.what());
+	}
+	catch (std::exception& e) {
+		std::cerr << e.what() << std::endl;
 	}
 
 	return 0;

@@ -14,7 +14,8 @@ int main(int argc, const char** argv)
 			std::cerr << "all is not a valid name" << std::endl;
 			return 1;
 		}
-	} else {
+	}
+	else {
 		std::cerr << "usage: " << argv[0] << " --name <your-name>" << std::endl;
 		return 1;
 	}
@@ -39,7 +40,6 @@ int main(int argc, const char** argv)
 			tcp::resolver resolver(io_context);
 			try {
 				asio::connect(socket, resolver.resolve(ip, port));
-				prompt = ip + ':' + port + '|' + name;
 
 				asio::write(socket, asio::buffer(name));
 
@@ -47,38 +47,64 @@ int main(int argc, const char** argv)
 				socket.read_some(asio::buffer(data));
 				if (strcmp("ok", data)) {
 					std::cerr << "user name registed, please try another name." << std::endl;
+					socket.close();
 				}
 				else {
+					// only one MS, so no need to consider reconnecting to other MS
 					connected = true;
+					prompt = ip + ':' + port + '|' + name;
 					reciever = std::thread([&]() {
 						char data[1024] = { 0 };
 						while (connected) {
 							try {
-								socket.read_some(asio::buffer(data));
-								std::cout << data << "\n";
+								auto n = socket.read_some(asio::buffer(data));
+								std::cout << std::endl << std::string(data, n) << std::endl;
+								std::cout << prompt << " > ";
+							}
+							catch (std::system_error& e) {
+								// 10054: remote close
+								if (e.code().value() == 10054) {
+									connected = false;
+									prompt = name;
+								}
+
+								// 10053: software caused connection abort
+								if (e.code().value() != 10053)
+									std::cerr << e.what() << std::endl;
 							}
 							catch (std::exception& e) {
 								std::cerr << e.what() << std::endl;
 							}
 						}
-					});
+						});
 				}
-			} catch (std::exception& e) {
-				std::cerr << e.what() << std::endl;
-			}
-		}
-
-		if (input[0] == '@') {
-			try {
-				asio::write(socket, asio::buffer(input));
 			}
 			catch (std::exception& e) {
 				std::cerr << e.what() << std::endl;
 			}
 		}
 
-		if (input == "BYE") {
-			if (connected) {
+		if (input[0] == '@') {
+			std::stringstream ss;
+
+			while (input.ends_with('\\')) {
+				input.pop_back();
+				ss << input << std::endl;
+				std::getline(std::cin, input);
+			}
+
+			ss << input;
+
+			try {
+				asio::write(socket, asio::buffer(ss.str()));
+			}
+			catch (std::exception& e) {
+				std::cerr << e.what() << std::endl;
+			}
+		}
+
+		if (input == "BYE" || input == "QUIT") {
+			if (reciever.joinable()) {
 				connected = false;
 				socket.close();
 				reciever.join();
@@ -86,14 +112,8 @@ int main(int argc, const char** argv)
 			prompt = name;
 		}
 
-		if (input == "QUIT") {
-			if (connected) {
-				connected = false;
-				socket.close();
-				reciever.join();
-			}
+		if (input == "QUIT")
 			break;
-		}
 
 		std::cout << prompt << " > ";
 	}
